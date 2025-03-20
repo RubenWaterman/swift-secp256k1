@@ -152,9 +152,9 @@ extension secp256k1.MuSig {
     /// - Parameter pubkeys: An array of Schnorr public keys to aggregate.
     /// - Returns: The aggregated Schnorr public key.
     /// - Throws: An error if aggregation fails.
-    public static func aggregate(_ pubkeys: [secp256k1.Schnorr.PublicKey]) throws -> secp256k1.MuSig.PublicKey {
+    public static func aggregate(_ pubkeys: [secp256k1.Schnorr.PublicKey], format: secp256k1.Format) throws -> secp256k1.MuSig.PublicKey {
         let context = secp256k1.Context.rawRepresentation
-        let format = secp256k1.Format.compressed
+        let format = format
         var pubKeyLen = format.length
         var aggPubkey = secp256k1_pubkey()
         var cache = secp256k1_musig_keyagg_cache()
