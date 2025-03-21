@@ -18,4 +18,7 @@ public enum secp256k1Error: Error {
 
     /// An unexpected error at a lower-level occurred.
     case underlyingCryptoError
+
+    // A invalid public key
+    case invalidPublicKey
 }
