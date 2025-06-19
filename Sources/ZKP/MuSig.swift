@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import Crypto
 
 #if canImport(libsecp256k1_zkp)
     @_implementationOnly import libsecp256k1_zkp
