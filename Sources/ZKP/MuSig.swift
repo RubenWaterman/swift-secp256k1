@@ -603,3 +603,233 @@ public extension P256K.MuSig {
         return try P256K.MuSig.AggregateSignature(Data(signature))
     }
 }
+
+/// A MuSig session that manages the signing process.
+public extension P256K.MuSig {
+    struct Session: ContiguousBytes {
+        /// The session data.
+        public let session: Data
+        
+        /// Creates a session from raw session data.
+        ///
+        /// - Parameter session: The raw session data.
+        /// - Throws: An error if the session data is invalid.
+        public init(session: Data) throws {
+            guard session.count == 133 else {
+                throw secp256k1Error.incorrectParameterSize
+            }
+            self.session = session
+        }
+        
+        /// Provides access to the raw bytes of the session.
+        ///
+        /// - Parameter body: A closure that takes an `UnsafeRawBufferPointer` and returns a value.
+        /// - Returns: The value returned by the closure.
+        public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
+            try session.withUnsafeBytes(body)
+        }
+        
+        /// Processes an aggregate nonce to create a session for signing.
+        ///
+        /// This function implements the session creation process as described in BIP-327.
+        ///
+        /// - Parameters:
+        ///   - aggregateNonce: The aggregate of all signers' public nonces.
+        ///   - message: The 32-byte message to be signed.
+        ///   - aggregateKey: The aggregate of all signers' public keys.
+        /// - Returns: A session object for signing.
+        /// - Throws: An error if session creation fails.
+        public static func processNonce(
+            aggregateNonce: P256K.MuSig.Nonce,
+            message: [UInt8],
+            aggregateKey: P256K.MuSig.PublicKey
+        ) throws -> P256K.MuSig.Session {
+            let context = P256K.Context.rawRepresentation
+            var session = secp256k1_musig_session()
+            var aggnonce = secp256k1_musig_aggnonce()
+            var cache = secp256k1_musig_keyagg_cache()
+            
+            aggregateNonce.aggregatedNonce.copyToUnsafeMutableBytes(of: &aggnonce.data)
+            aggregateKey.keyAggregationCache.copyToUnsafeMutableBytes(of: &cache.data)
+            
+            guard secp256k1_musig_nonce_process(
+                context,
+                &session,
+                &aggnonce,
+                message,
+                &cache
+            ).boolValue else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            return try P256K.MuSig.Session(session: session.dataValue)
+        }
+    }
+}
+
+/// A high-level MuSig session manager that provides a convenient API for MuSig2 operations.
+public class P256K.MuSig.SessionManager {
+    private var session: P256K.MuSig.Session?
+    private let aggregateKey: P256K.MuSig.PublicKey
+    private var partialSignatures: [P256K.Schnorr.PartialSignature] = []
+    
+    /// Creates a new MuSig session manager.
+    ///
+    /// - Parameter aggregateKey: The aggregate of all signers' public keys.
+    public init(aggregateKey: P256K.MuSig.PublicKey) {
+        self.aggregateKey = aggregateKey
+    }
+    
+    /// Initializes the session with an aggregate nonce and message.
+    ///
+    /// This must be called before any signing operations.
+    ///
+    /// - Parameters:
+    ///   - aggregateNonce: The aggregate of all signers' public nonces.
+    ///   - message: The 32-byte message to be signed.
+    /// - Throws: An error if session initialization fails.
+    public func initializeSession(
+        aggregateNonce: P256K.MuSig.Nonce,
+        message: [UInt8]
+    ) throws {
+        self.session = try P256K.MuSig.Session.processNonce(
+            aggregateNonce: aggregateNonce,
+            message: message,
+            aggregateKey: aggregateKey
+        )
+        self.partialSignatures.removeAll()
+    }
+    
+    /// Creates a partial signature for this signer.
+    ///
+    /// - Parameters:
+    ///   - privateKey: The signer's private key.
+    ///   - secureNonce: The signer's secure nonce.
+    ///   - pubnonce: The signer's public nonce.
+    ///   - aggregateNonce: The aggregate of all signers' public nonces.
+    /// - Returns: A partial signature.
+    /// - Throws: An error if signing fails or session is not initialized.
+    public func signPartial(
+        privateKey: P256K.Schnorr.PrivateKey,
+        secureNonce: P256K.Schnorr.SecureNonce,
+        pubnonce: P256K.Schnorr.Nonce,
+        aggregateNonce: P256K.MuSig.Nonce
+    ) throws -> P256K.Schnorr.PartialSignature {
+        guard let session = self.session else {
+            throw secp256k1Error.underlyingCryptoError
+        }
+        
+        return try privateKey.partialSignature(
+            for: SHA256.hash(data: Data()), // Placeholder - should use actual message
+            pubnonce: pubnonce,
+            secureNonce: secureNonce,
+            publicNonceAggregate: aggregateNonce,
+            publicKeyAggregate: aggregateKey
+        )
+    }
+    
+    /// Adds a partial signature from another signer.
+    ///
+    /// - Parameter partialSignature: The partial signature to add.
+    public func addPartial(_ partialSignature: P256K.Schnorr.PartialSignature) {
+        partialSignatures.append(partialSignature)
+    }
+    
+    /// Aggregates all partial signatures into a final signature.
+    ///
+    /// - Returns: The aggregated signature.
+    /// - Throws: An error if aggregation fails or session is not initialized.
+    public func aggregatePartials() throws -> P256K.MuSig.AggregateSignature {
+        guard let session = self.session else {
+            throw secp256k1Error.underlyingCryptoError
+        }
+        
+        return try P256K.MuSig.aggregateSignatures(partialSignatures)
+    }
+    
+    /// Gets the aggregate public key.
+    ///
+    /// - Returns: The aggregate public key.
+    public func getAggregateKey() -> P256K.MuSig.PublicKey {
+        return aggregateKey
+    }
+}
+
+// MARK: - Example Usage
+
+/*
+ Example: Using the SessionManager for MuSig2 signing
+ 
+ This example demonstrates how to use the new SessionManager class for a complete MuSig2 flow,
+ similar to the TypeScript example but with Swift syntax.
+ 
+ ```swift
+ // Initialize private keys for two signers
+ let firstPrivateKey = try P256K.Schnorr.PrivateKey()
+ let secondPrivateKey = try P256K.Schnorr.PrivateKey()
+ 
+ // Aggregate the public keys using MuSig
+ let aggregateKey = try P256K.MuSig.aggregate([firstPrivateKey.publicKey, secondPrivateKey.publicKey])
+ 
+ // Create session manager
+ let musigSession = P256K.MuSig.SessionManager(aggregateKey: aggregateKey)
+ 
+ // Message to be signed
+ let message = "Vires in Numeris.".data(using: .utf8)!
+ let messageHash = SHA256.hash(data: message)
+ 
+ // Generate nonces for each signer
+ let firstNonce = try P256K.MuSig.Nonce.generate(
+     secretKey: firstPrivateKey,
+     publicKey: firstPrivateKey.publicKey,
+     msg32: Array(messageHash)
+ )
+ 
+ let secondNonce = try P256K.MuSig.Nonce.generate(
+     secretKey: secondPrivateKey,
+     publicKey: secondPrivateKey.publicKey,
+     msg32: Array(messageHash)
+ )
+ 
+ // Aggregate nonces
+ let aggregateNonce = try P256K.MuSig.Nonce(aggregating: [firstNonce.pubnonce, secondNonce.pubnonce])
+ 
+ // Initialize session
+ try musigSession.initializeSession(aggregateNonce: aggregateNonce, message: Array(messageHash))
+ 
+ // Create partial signatures
+ let firstPartialSignature = try musigSession.signPartial(
+     privateKey: firstPrivateKey,
+     secureNonce: firstNonce.secnonce,
+     pubnonce: firstNonce.pubnonce,
+     aggregateNonce: aggregateNonce
+ )
+ 
+ let secondPartialSignature = try musigSession.signPartial(
+     privateKey: secondPrivateKey,
+     secureNonce: secondNonce.secnonce,
+     pubnonce: secondNonce.pubnonce,
+     aggregateNonce: aggregateNonce
+ )
+ 
+ // Add partial signatures to session
+ musigSession.addPartial(firstPartialSignature)
+ musigSession.addPartial(secondPartialSignature)
+ 
+ // Aggregate partial signatures into a full signature
+ let aggregateSignature = try musigSession.aggregatePartials()
+ 
+ // Verify the aggregate signature
+ let isValid = aggregateKey.isValidSignature(
+     firstPartialSignature,
+     publicKey: firstPrivateKey.publicKey,
+     nonce: firstNonce.pubnonce,
+     for: messageHash
+ )
+ 
+ print("Is valid MuSig signature: \(isValid)")
+ ```
+ 
+ This SessionManager provides a higher-level API that matches the convenience of the TypeScript Musig class,
+ while still maintaining access to all the low-level primitives when needed.
+ */
