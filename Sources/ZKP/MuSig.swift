@@ -153,9 +153,9 @@ public extension P256K.MuSig {
     /// - Parameter pubkeys: An array of Schnorr public keys to aggregate.
     /// - Returns: The aggregated Schnorr public key.
     /// - Throws: An error if aggregation fails.
-    static func aggregate(_ pubkeys: [P256K.Schnorr.PublicKey]) throws -> P256K.MuSig.PublicKey {
+    static func aggregate(_ pubkeys: [P256K.Schnorr.PublicKey], format: P256K.Format) throws -> P256K.MuSig.PublicKey {
         let context = P256K.Context.rawRepresentation
-        let format = P256K.Format.compressed
+        let format = format
         var pubKeyLen = format.length
         var aggPubkey = secp256k1_pubkey()
         var cache = secp256k1_musig_keyagg_cache()
