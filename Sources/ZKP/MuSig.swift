@@ -279,6 +279,53 @@ public extension P256K.Schnorr {
             self.session = Data(session)
         }
 
+        /// Creates a partial signature from a hexadecimal string representation.
+        ///
+        /// This initializer parses a serialized partial signature from a hexadecimal string.
+        /// The input string must represent 32 bytes (64 hex characters) of data.
+        ///
+        /// - Parameters:
+        ///   - hexString: A hexadecimal string representing the 32-byte serialized partial signature.
+        ///   - session: The MuSig session data.
+        /// - Throws: An error if parsing fails or the string is not valid hex.
+        public init(hexString: String, session: Data) throws {
+            // Remove any "0x" prefix if present
+            var cleanedHexString = hexString
+            if hexString.hasPrefix("0x") {
+                cleanedHexString = String(hexString.dropFirst(2))
+            }
+            
+            // Check if the hex string has the correct length
+            guard cleanedHexString.count == 64 else {
+                throw secp256k1Error.incorrectParameterSize
+            }
+            
+            // Parse the hex string into bytes using the existing String.bytes property
+            let bytes = try cleanedHexString.bytes
+            
+            // Parse the serialized signature using the C function
+            let context = P256K.Context.rawRepresentation
+            var partialSig = secp256k1_musig_partial_sig()
+            
+            guard bytes.withUnsafeBufferPointer({ serializedPtr in
+                secp256k1_musig_partial_sig_parse(context, &partialSig, serializedPtr.baseAddress!).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            // Convert the parsed partial signature to the expected format
+            var serializedPartialSig = [UInt8](repeating: 0, count: P256K.ByteLength.partialSignature)
+            
+            Swift.withUnsafeBytes(of: partialSig) { src in
+                serializedPartialSig.withUnsafeMutableBytes { dst in
+                    dst.copyBytes(from: src)
+                }
+            }
+            
+            self.dataRepresentation = Data(bytes: &serializedPartialSig, count: P256K.ByteLength.partialSignature)
+            self.session = session
+        }
+
         /// Initializes SchnorrSignature from the raw representation.
         /// - Parameters:
         ///     - rawRepresentation: A raw representation of the key as a collection of contiguous bytes.
@@ -298,6 +345,36 @@ public extension P256K.Schnorr {
         /// - Returns: The value returned by the closure.
         public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
             try dataRepresentation.withUnsafeBytes(body)
+        }
+
+        /// Serializes the partial signature to a hexadecimal string representation.
+        ///
+        /// This method extracts the 32-byte serialized partial signature and converts it to a
+        /// 64-character hexadecimal string that can be shared with other parties in the MuSig protocol.
+        ///
+        /// - Parameter uppercase: Whether to use uppercase letters in the hex string. Default is false.
+        /// - Returns: A 64-character hexadecimal string containing the serialized partial signature.
+        /// - Throws: An error if serialization fails.
+        public func serializedHex(uppercase: Bool = false) throws -> String {
+            let context = P256K.Context.rawRepresentation
+            var output = [UInt8](repeating: 0, count: 32)
+            var partialSig = secp256k1_musig_partial_sig()
+            
+            // Extract the partial signature from the dataRepresentation
+            dataRepresentation.copyToUnsafeMutableBytes(of: &partialSig.data)
+            
+            guard output.withUnsafeMutableBufferPointer({ outputPtr in
+                secp256k1_musig_partial_sig_serialize(context, outputPtr.baseAddress!, &partialSig).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            // Convert to hex string
+            var hexString = ""
+            for byte in output {
+                hexString += String(format: uppercase ? "%02X" : "%02x", byte)
+            }
+            return hexString
         }
     }
 }
