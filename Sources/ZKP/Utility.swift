@@ -24,11 +24,24 @@ public extension ContiguousBytes {
     }
 }
 
+/// An extension for Array<UInt8> providing convenience properties.
+public extension Array where Element == UInt8 {
+    /// Returns a hexadecimal string representation of the byte array.
+    @inlinable var hex: String {
+        map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 /// An extension for Data providing convenience properties and functions.
 public extension Data {
     /// A property that returns an array of UInt8 bytes.
     @inlinable var bytes: [UInt8] {
         withUnsafeBytes { bytesPtr in Array(bytesPtr) }
+    }
+
+    /// Returns a hexadecimal string representation of the data.
+    @inlinable var hex: String {
+        map { String(format: "%02x", $0) }.joined()
     }
 
     /// Copies data to unsafe mutable bytes of a given value.
@@ -110,6 +123,11 @@ public extension String {
             try Array(hexString: lowercased())
         }
     }
+    
+    /// Returns a hexadecimal string representation of the string's UTF-8 bytes.
+    var hex: String {
+        data(using: .utf8)?.hex ?? ""
+    }
 }
 
 /// A utility class or struct to contain the static function
@@ -138,5 +156,15 @@ enum PointerArrayUtility {
         }
 
         return body(&pointers)
+    }
+}
+
+/// An extension for Digest providing convenience properties.
+public extension Digest {
+    /// Returns a hexadecimal string representation of the digest.
+    @inlinable var hex: String {
+        withUnsafeBytes { bytes in
+            bytes.map { String(format: "%02x", $0) }.joined()
+        }
     }
 }

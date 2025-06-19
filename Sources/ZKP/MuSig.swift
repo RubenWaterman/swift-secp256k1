@@ -565,6 +565,11 @@ public extension P256K.MuSig {
         public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
             try dataRepresentation.withUnsafeBytes(body)
         }
+        
+        /// Returns a hexadecimal string representation of the aggregate signature.
+        public var hex: String {
+            dataRepresentation.hex
+        }
     }
 }
 
