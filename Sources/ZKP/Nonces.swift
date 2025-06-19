@@ -304,12 +304,3 @@ public extension P256K.Schnorr {
         }
     }
 }
-
-// MARK: - Data Extensions
-
-extension Data {
-    /// Returns a hexadecimal string representation of the data.
-    public var hex: String {
-        map { String(format: "%02x", $0) }.joined()
-    }
-}
