@@ -241,10 +241,13 @@ public extension P256K.Schnorr {
             try self.init(serializedNonce: bytes)
         }
 
-        /// Initializes a nonce with pre-parsed pubnonce data.
+        /// Creates a public nonce directly from raw pubnonce data.
+        ///
+        /// This initializer creates a nonce from pre-parsed pubnonce data.
+        /// The data should be in the correct internal format (66 bytes).
         ///
         /// - Parameter pubnonce: The raw pubnonce data.
-        init(pubnonce: Data) {
+        public init(pubnonce: Data) {
             self.pubnonce = pubnonce
         }
 
