@@ -150,12 +150,14 @@ public extension P256K.MuSig {
     ///
     /// This function implements the key aggregation process as described in BIP-327.
     ///
-    /// - Parameter pubkeys: An array of Schnorr public keys to aggregate.
+    /// - Parameters:
+    ///   - pubkeys: An array of Schnorr public keys to aggregate.
+    ///   - sortKeys: Whether to sort the public keys before aggregation. Defaults to true for MuSig2 specification compliance.
+    ///   - format: The format of the returned public key. Defaults to compressed format.
     /// - Returns: The aggregated Schnorr public key.
     /// - Throws: An error if aggregation fails.
-    static func aggregate(_ pubkeys: [P256K.Schnorr.PublicKey], format: P256K.Format) throws -> P256K.MuSig.PublicKey {
+    static func aggregate(_ pubkeys: [P256K.Schnorr.PublicKey], sortKeys: Bool = true, format: P256K.Format = .compressed) throws -> P256K.MuSig.PublicKey {
         let context = P256K.Context.rawRepresentation
-        let format = format
         var pubKeyLen = format.length
         var aggPubkey = secp256k1_pubkey()
         var cache = secp256k1_musig_keyagg_cache()
@@ -163,13 +165,21 @@ public extension P256K.MuSig {
 
         guard PointerArrayUtility
             .withUnsafePointerArray(pubkeys.map { $0.baseKey.rawRepresentation }, { pointers in
-                #if canImport(libsecp256k1_zkp)
-                    secp256k1_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                if sortKeys {
+                    #if canImport(libsecp256k1_zkp)
+                        secp256k1_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                            secp256k1_musig_pubkey_agg(context, nil, nil, &cache, pointers, pointers.count).boolValue
+                    #elseif canImport(libsecp256k1)
+                        secp256k1_ec_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                            secp256k1_musig_pubkey_agg(context, nil, &cache, pointers, pointers.count).boolValue
+                    #endif
+                } else {
+                    #if canImport(libsecp256k1_zkp)
                         secp256k1_musig_pubkey_agg(context, nil, nil, &cache, pointers, pointers.count).boolValue
-                #elseif canImport(libsecp256k1)
-                    secp256k1_ec_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                    #elseif canImport(libsecp256k1)
                         secp256k1_musig_pubkey_agg(context, nil, &cache, pointers, pointers.count).boolValue
-                #endif
+                    #endif
+                }
             }), secp256k1_musig_pubkey_get(context, &aggPubkey, &cache).boolValue,
             secp256k1_ec_pubkey_serialize(
                 context,
