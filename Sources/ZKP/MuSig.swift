@@ -150,12 +150,14 @@ public extension P256K.MuSig {
     ///
     /// This function implements the key aggregation process as described in BIP-327.
     ///
-    /// - Parameter pubkeys: An array of Schnorr public keys to aggregate.
+    /// - Parameters:
+    ///   - pubkeys: An array of Schnorr public keys to aggregate.
+    ///   - sortKeys: Whether to sort the public keys before aggregation. Defaults to true for MuSig2 specification compliance.
+    ///   - format: The format of the returned public key. Defaults to compressed format.
     /// - Returns: The aggregated Schnorr public key.
     /// - Throws: An error if aggregation fails.
-    static func aggregate(_ pubkeys: [P256K.Schnorr.PublicKey]) throws -> P256K.MuSig.PublicKey {
+    static func aggregate(_ pubkeys: [P256K.Schnorr.PublicKey], sortKeys: Bool = true, format: P256K.Format = .compressed) throws -> P256K.MuSig.PublicKey {
         let context = P256K.Context.rawRepresentation
-        let format = P256K.Format.compressed
         var pubKeyLen = format.length
         var aggPubkey = secp256k1_pubkey()
         var cache = secp256k1_musig_keyagg_cache()
@@ -163,13 +165,36 @@ public extension P256K.MuSig {
 
         guard PointerArrayUtility
             .withUnsafePointerArray(pubkeys.map { $0.baseKey.rawRepresentation }, { pointers in
-                #if canImport(libsecp256k1_zkp)
-                    secp256k1_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                if sortKeys {
+                    #if canImport(libsecp256k1_zkp)
+                        secp256k1_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                            secp256k1_musig_pubkey_agg(context, nil, nil, &cache, pointers, pointers.count).boolValue
+                    #elseif canImport(libsecp256k1)
+                        secp256k1_ec_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                            secp256k1_musig_pubkey_agg(context, nil, &cache, pointers, pointers.count).boolValue
+                    #endif
+                } else {
+                    #if canImport(libsecp256k1_zkp)
                         secp256k1_musig_pubkey_agg(context, nil, nil, &cache, pointers, pointers.count).boolValue
-                #elseif canImport(libsecp256k1)
-                    secp256k1_ec_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                    #elseif canImport(libsecp256k1)
                         secp256k1_musig_pubkey_agg(context, nil, &cache, pointers, pointers.count).boolValue
-                #endif
+                    #endif
+                }
+                if sortKeys {
+                    #if canImport(libsecp256k1_zkp)
+                        secp256k1_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                            secp256k1_musig_pubkey_agg(context, nil, nil, &cache, pointers, pointers.count).boolValue
+                    #elseif canImport(libsecp256k1)
+                        secp256k1_ec_pubkey_sort(context, &pointers, pointers.count).boolValue &&
+                            secp256k1_musig_pubkey_agg(context, nil, &cache, pointers, pointers.count).boolValue
+                    #endif
+                } else {
+                    #if canImport(libsecp256k1_zkp)
+                        secp256k1_musig_pubkey_agg(context, nil, nil, &cache, pointers, pointers.count).boolValue
+                    #elseif canImport(libsecp256k1)
+                        secp256k1_musig_pubkey_agg(context, nil, &cache, pointers, pointers.count).boolValue
+                    #endif
+                }
             }), secp256k1_musig_pubkey_get(context, &aggPubkey, &cache).boolValue,
             secp256k1_ec_pubkey_serialize(
                 context,
@@ -258,6 +283,7 @@ public extension P256K.MuSig.XonlyKey {
 
 /// A Schnorr (Schnorr Digital Signature Scheme) Signature
 public extension P256K.Schnorr {
+    /// Represents a partial signature used for MuSig operations.
     struct PartialSignature: ContiguousBytes {
         /// Returns the raw signature in a fixed 64-byte format.
         public var dataRepresentation: Data
@@ -279,6 +305,38 @@ public extension P256K.Schnorr {
             self.session = Data(session)
         }
 
+        /// Creates a partial signature from a hex string (32-byte signature only).
+        /// Note: This creates a partial signature without session data, which may not be usable
+        /// for aggregation unless the session data is provided separately.
+        ///
+        /// - Parameter hexString: A hex string representing the 32-byte partial signature.
+        /// - Throws: An error if the hex string is invalid or not exactly 64 characters (32 bytes).
+        public init(hexString: String) throws {
+            guard hexString.count == 64 else { // 32 bytes = 64 hex characters
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            let data = try Data(hexString: hexString)
+            self.dataRepresentation = data
+            // Create empty session data - this will need to be set properly for aggregation
+            self.session = Data(repeating: 0, count: 133)
+        }
+
+        /// Creates a partial signature from raw data (32-byte signature only).
+        /// Note: This creates a partial signature without session data, which may not be usable
+        /// for aggregation unless the session data is provided separately.
+        ///
+        /// - Parameter data: The 32-byte partial signature data.
+        /// - Throws: An error if the data is not exactly 32 bytes.
+        public init(data: Data) throws {
+            guard data.count == 32 else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            self.dataRepresentation = data
+            // Create empty session data - this will need to be set properly for aggregation
+            self.session = Data(repeating: 0, count: 133)
+        }
+
         /// Initializes SchnorrSignature from the raw representation.
         /// - Parameters:
         ///     - rawRepresentation: A raw representation of the key as a collection of contiguous bytes.
@@ -298,6 +356,18 @@ public extension P256K.Schnorr {
         /// - Returns: The value returned by the closure.
         public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
             try dataRepresentation.withUnsafeBytes(body)
+        }
+
+        /// Sets the session data for this partial signature.
+        /// This is useful when importing external partial signatures that don't include session data.
+        ///
+        /// - Parameter session: The 133-byte session data.
+        /// - Throws: An error if the session data is not exactly 133 bytes.
+        public mutating func setSession(_ session: Data) throws {
+            guard session.count == 133 else {
+                throw secp256k1Error.incorrectParameterSize
+            }
+            self.session = session
         }
     }
 }
@@ -488,6 +558,11 @@ public extension P256K.MuSig {
         public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
             try dataRepresentation.withUnsafeBytes(body)
         }
+        
+        /// Returns a hexadecimal string representation of the aggregate signature.
+        public var hex: String {
+            dataRepresentation.hex
+        }
     }
 }
 
@@ -504,7 +579,9 @@ public extension P256K.MuSig {
         var signature = [UInt8](repeating: 0, count: P256K.ByteLength.signature)
         var session = secp256k1_musig_session()
 
-        partialSignatures.first?.session.copyToUnsafeMutableBytes(of: &session.data)
+        // Find the first partial signature with non-empty session data
+        let sessionData = partialSignatures.first { !$0.session.allSatisfy({ $0 == 0 }) }?.session ?? partialSignatures.first?.session
+        sessionData?.copyToUnsafeMutableBytes(of: &session.data)
 
         guard PointerArrayUtility.withUnsafePointerArray(
             partialSignatures.map {
@@ -519,5 +596,68 @@ public extension P256K.MuSig {
         }
 
         return try P256K.MuSig.AggregateSignature(Data(signature))
+    }
+}
+
+/// A MuSig session that manages the signing process.
+public extension P256K.MuSig {
+    struct Session: ContiguousBytes {
+        /// The session data.
+        public let session: Data
+        
+        /// Creates a session from raw session data.
+        ///
+        /// - Parameter session: The raw session data.
+        /// - Throws: An error if the session data is invalid.
+        public init(session: Data) throws {
+            guard session.count == 133 else {
+                throw secp256k1Error.incorrectParameterSize
+            }
+            self.session = session
+        }
+        
+        /// Provides access to the raw bytes of the session.
+        ///
+        /// - Parameter body: A closure that takes an `UnsafeRawBufferPointer` and returns a value.
+        /// - Returns: The value returned by the closure.
+        public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
+            try session.withUnsafeBytes(body)
+        }
+        
+        /// Processes an aggregate nonce to create a session for signing.
+        ///
+        /// This function implements the session creation process as described in BIP-327.
+        ///
+        /// - Parameters:
+        ///   - aggregateNonce: The aggregate of all signers' public nonces.
+        ///   - message: The 32-byte message to be signed.
+        ///   - aggregateKey: The aggregate of all signers' public keys.
+        /// - Returns: A session object for signing.
+        /// - Throws: An error if session creation fails.
+        public static func processNonce(
+            aggregateNonce: P256K.MuSig.Nonce,
+            message: [UInt8],
+            aggregateKey: P256K.MuSig.PublicKey
+        ) throws -> P256K.MuSig.Session {
+            let context = P256K.Context.rawRepresentation
+            var session = secp256k1_musig_session()
+            var aggnonce = secp256k1_musig_aggnonce()
+            var cache = secp256k1_musig_keyagg_cache()
+            
+            aggregateNonce.aggregatedNonce.copyToUnsafeMutableBytes(of: &aggnonce.data)
+            aggregateKey.keyAggregationCache.copyToUnsafeMutableBytes(of: &cache.data)
+            
+            guard secp256k1_musig_nonce_process(
+                context,
+                &session,
+                &aggnonce,
+                message,
+                &cache
+            ).boolValue else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            return try P256K.MuSig.Session(session: session.dataValue)
+        }
     }
 }

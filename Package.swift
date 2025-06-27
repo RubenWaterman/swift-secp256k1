@@ -9,7 +9,8 @@ let package = Package(
         .library(name: "libsecp256k1", targets: ["libsecp256k1"]),
         .library(name: "libsecp256k1_zkp", targets: ["libsecp256k1_zkp"]),
         .library(name: "P256K", targets: ["P256K"]),
-        .library(name: "ZKP", targets: ["ZKP"])
+        .library(name: "ZKP", targets: ["ZKP"]),
+        .executable(name: "MuSigExample", targets: ["MuSigExample"])
     ],
     dependencies: [
         // Dependencies used for package development
@@ -21,6 +22,7 @@ let package = Package(
     targets: [
         .target(name: "P256K", dependencies: ["libsecp256k1"]),
         .target(name: "ZKP", dependencies: ["libsecp256k1_zkp"]),
+        .executableTarget(name: "MuSigExample", dependencies: ["P256K"]),
         .target(
             name: "libsecp256k1",
             cSettings: PackageDescription.CSetting.baseSettings

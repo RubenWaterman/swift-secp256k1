@@ -32,12 +32,20 @@ public extension P256K.MuSig {
             let context = P256K.Context.rawRepresentation
             var aggNonce = secp256k1_musig_aggnonce()
 
+            // Parse the serialized nonces back into internal structures
+            let parsedNonces = try pubnonces.map { schnorrNonce in
+                var pubnonce = secp256k1_musig_pubnonce()
+                // Parse the serialized 66-byte data back into the internal structure
+                guard schnorrNonce.pubnonce.withUnsafeBytes({ bytes in
+                    secp256k1_musig_pubnonce_parse(context, &pubnonce, bytes.baseAddress!).boolValue
+                }) else {
+                    throw secp256k1Error.underlyingCryptoError
+                }
+                return pubnonce
+            }
+
             guard PointerArrayUtility.withUnsafePointerArray(
-                pubnonces.map {
-                    var pubnonce = secp256k1_musig_pubnonce()
-                    $0.pubnonce.copyToUnsafeMutableBytes(of: &pubnonce.data)
-                    return pubnonce
-                }, { pointers in
+                parsedNonces, { pointers in
                     secp256k1_musig_nonce_agg(context, &aggNonce, pointers, pointers.count).boolValue
                 }
             ) else {
@@ -146,8 +154,16 @@ public extension P256K.MuSig {
                 }
             #endif
 
+            // Serialize the public nonce to the proper 66-byte format
+            var serializedPubnonce = [UInt8](repeating: 0, count: 66)
+            guard serializedPubnonce.withUnsafeMutableBufferPointer({ buffer in
+                secp256k1_musig_pubnonce_serialize(context, buffer.baseAddress!, &pubnonce).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+
             return NonceResult(
-                pubnonce: P256K.Schnorr.Nonce(pubnonce: Swift.withUnsafeBytes(of: pubnonce) { Data($0) }),
+                pubnonce: try P256K.Schnorr.Nonce(data: Data(serializedPubnonce)),
                 secnonce: P256K.Schnorr.SecureNonce(Swift.withUnsafeBytes(of: secnonce) { Data($0) })
             )
         }
@@ -179,6 +195,78 @@ public extension P256K.Schnorr {
     struct Nonce: ContiguousBytes, Sequence {
         /// The public nonce data.
         let pubnonce: Data
+        
+        /// Creates a public nonce from serialized 66-byte data.
+        ///
+        /// This initializer parses a serialized public nonce using the secp256k1_musig_pubnonce_parse function.
+        /// The input must be a 66-byte array representing the compressed form of two public keys.
+        ///
+        /// - Parameter serializedNonce: A 66-byte serialized nonce.
+        /// - Throws: An error if parsing fails.
+        public init(serializedNonce: Data) throws {
+            guard serializedNonce.count == 66 else {
+                throw secp256k1Error.incorrectParameterSize
+            }
+            
+            let context = P256K.Context.rawRepresentation
+            var pubnonce = secp256k1_musig_pubnonce()
+            
+            var serializedCopy = [UInt8](serializedNonce)
+            guard serializedCopy.withUnsafeMutableBytes({ serializedPtr in
+                secp256k1_musig_pubnonce_parse(context, &pubnonce, serializedPtr.baseAddress!).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            self.pubnonce = Data(Swift.withUnsafeBytes(of: pubnonce) { Data($0) })
+        }
+        
+        /// Creates a public nonce from serialized 66-byte array.
+        ///
+        /// This initializer parses a serialized public nonce using the secp256k1_musig_pubnonce_parse function.
+        /// The input must be a 66-byte array representing the compressed form of two public keys.
+        ///
+        /// - Parameter serializedNonce: A 66-byte serialized nonce array.
+        /// - Throws: An error if parsing fails.
+        public init(serializedNonce: [UInt8]) throws {
+            try self.init(serializedNonce: Data(serializedNonce))
+        }
+
+        /// Creates a public nonce directly from raw pubnonce data.
+        ///
+        /// This initializer creates a nonce from pre-parsed pubnonce data.
+        /// The data should be in the correct internal format (66 bytes).
+        ///
+        /// - Parameter pubnonce: The raw pubnonce data.
+        public init(pubnonce: Data) {
+            self.pubnonce = pubnonce
+        }
+
+        /// Creates a public nonce from raw data.
+        ///
+        /// - Parameter data: The 66-byte public nonce data.
+        /// - Throws: An error if the data is not exactly 66 bytes.
+        public init(data: Data) throws {
+            guard data.count == 66 else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            self.pubnonce = data
+        }
+
+        /// Creates a public nonce from a hex string.
+        ///
+        /// - Parameter hexString: A hex string representing the 66-byte public nonce.
+        /// - Throws: An error if the hex string is invalid or not exactly 132 characters (66 bytes).
+        public init(hexString: String) throws {
+            guard hexString.count == 132 else { // 66 bytes = 132 hex characters
+                throw secp256k1Error.underlyingCryptoError
+            }
+            let data = try Data(hexString: hexString)
+            guard data.count == 66 else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            self.pubnonce = data
+        }
 
         /// Provides access to the raw bytes of the public nonce.
         ///
@@ -193,6 +281,46 @@ public extension P256K.Schnorr {
         /// - Returns: An iterator for the public nonce data.
         public func makeIterator() -> Data.Iterator {
             pubnonce.makeIterator()
+        }
+
+        /// Serializes the public nonce to a 66-byte representation.
+        ///
+        /// This method serializes the internal nonce representation to a 66-byte array
+        /// that can be shared with other parties in the MuSig protocol.
+        ///
+        /// - Returns: A 66-byte Data object containing the serialized nonce.
+        /// - Throws: An error if serialization fails.
+        public func serialized() throws -> Data {
+            let context = P256K.Context.rawRepresentation
+            var output = Data(count: 66)
+            var nonceCopy = secp256k1_musig_pubnonce()
+            
+            pubnonce.copyToUnsafeMutableBytes(of: &nonceCopy.data)
+            
+            guard output.withUnsafeMutableBytes({ outputPtr in
+                secp256k1_musig_pubnonce_serialize(context, outputPtr.baseAddress!, &nonceCopy).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            return output
+        }
+
+        /// Serializes the public nonce to a hexadecimal string representation.
+        ///
+        /// This method serializes the internal nonce representation to a 132-character
+        /// hexadecimal string that can be shared with other parties in the MuSig protocol.
+        ///
+        /// - Parameter uppercase: Whether to use uppercase letters in the hex string. Default is false.
+        /// - Returns: A 132-character hexadecimal string containing the serialized nonce.
+        /// - Throws: An error if serialization fails.
+        public func serializedHex(uppercase: Bool = false) throws -> String {
+            let data = try serialized()
+            var hexString = ""
+            for byte in data {
+                hexString += String(format: uppercase ? "%02X" : "%02x", byte)
+            }
+            return hexString
         }
     }
 }
