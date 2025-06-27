@@ -9,18 +9,20 @@ let package = Package(
         .library(name: "libsecp256k1", targets: ["libsecp256k1"]),
         .library(name: "libsecp256k1_zkp", targets: ["libsecp256k1_zkp"]),
         .library(name: "P256K", targets: ["P256K"]),
-        .library(name: "ZKP", targets: ["ZKP"])
+        .library(name: "ZKP", targets: ["ZKP"]),
+        .executable(name: "MuSigExample", targets: ["MuSigExample"])
     ],
     dependencies: [
         // Dependencies used for package development
         .package(url: "https://github.com/csjones/lefthook-plugin.git", exact: "1.11.14"),
-        .package(url: "https://github.com/21-DOT-DEV/swift-plugin-tuist.git", exact: "4.53.4"),
+        .package(url: "https://github.com/21-DOT-DEV/swift-plugin-tuist.git", exact: "4.54.3"),
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", exact: "0.56.4"),
         .package(url: "https://github.com/realm/SwiftLint.git", exact: "0.59.1")
     ],
     targets: [
         .target(name: "P256K", dependencies: ["libsecp256k1"]),
         .target(name: "ZKP", dependencies: ["libsecp256k1_zkp"]),
+        .executableTarget(name: "MuSigExample", dependencies: ["P256K"]),
         .target(
             name: "libsecp256k1",
             cSettings: PackageDescription.CSetting.baseSettings
