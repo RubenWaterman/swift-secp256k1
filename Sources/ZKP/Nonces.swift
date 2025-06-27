@@ -32,12 +32,20 @@ public extension P256K.MuSig {
             let context = P256K.Context.rawRepresentation
             var aggNonce = secp256k1_musig_aggnonce()
 
+            // Parse the serialized nonces back into internal structures
+            let parsedNonces = try pubnonces.map { schnorrNonce in
+                var pubnonce = secp256k1_musig_pubnonce()
+                // Parse the serialized 66-byte data back into the internal structure
+                guard schnorrNonce.pubnonce.withUnsafeBytes({ bytes in
+                    secp256k1_musig_pubnonce_parse(context, &pubnonce, bytes.baseAddress!).boolValue
+                }) else {
+                    throw secp256k1Error.underlyingCryptoError
+                }
+                return pubnonce
+            }
+
             guard PointerArrayUtility.withUnsafePointerArray(
-                pubnonces.map {
-                    var pubnonce = secp256k1_musig_pubnonce()
-                    $0.pubnonce.copyToUnsafeMutableBytes(of: &pubnonce.data)
-                    return pubnonce
-                }, { pointers in
+                parsedNonces, { pointers in
                     secp256k1_musig_nonce_agg(context, &aggNonce, pointers, pointers.count).boolValue
                 }
             ) else {
@@ -146,8 +154,16 @@ public extension P256K.MuSig {
                 }
             #endif
 
+            // Serialize the public nonce to the proper 66-byte format
+            var serializedPubnonce = [UInt8](repeating: 0, count: 66)
+            guard serializedPubnonce.withUnsafeMutableBufferPointer({ buffer in
+                secp256k1_musig_pubnonce_serialize(context, buffer.baseAddress!, &pubnonce).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+
             return NonceResult(
-                pubnonce: P256K.Schnorr.Nonce(pubnonce: Swift.withUnsafeBytes(of: pubnonce) { Data($0) }),
+                pubnonce: try P256K.Schnorr.Nonce(data: Data(serializedPubnonce)),
                 secnonce: P256K.Schnorr.SecureNonce(Swift.withUnsafeBytes(of: secnonce) { Data($0) })
             )
         }
@@ -179,6 +195,32 @@ public extension P256K.Schnorr {
     struct Nonce: ContiguousBytes, Sequence {
         /// The public nonce data.
         let pubnonce: Data
+
+        /// Creates a public nonce from raw data.
+        ///
+        /// - Parameter data: The 66-byte public nonce data.
+        /// - Throws: An error if the data is not exactly 66 bytes.
+        public init(data: Data) throws {
+            guard data.count == 66 else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            self.pubnonce = data
+        }
+
+        /// Creates a public nonce from a hex string.
+        ///
+        /// - Parameter hexString: A hex string representing the 66-byte public nonce.
+        /// - Throws: An error if the hex string is invalid or not exactly 132 characters (66 bytes).
+        public init(hexString: String) throws {
+            guard hexString.count == 132 else { // 66 bytes = 132 hex characters
+                throw secp256k1Error.underlyingCryptoError
+            }
+            let data = try Data(hexString: hexString)
+            guard data.count == 66 else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            self.pubnonce = data
+        }
 
         /// Provides access to the raw bytes of the public nonce.
         ///
