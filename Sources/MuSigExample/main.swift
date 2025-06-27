@@ -64,9 +64,9 @@ do {
     let aggregateWithExternal = try P256K.MuSig.Nonce(aggregating: [firstNonce.pubnonce, externalNonce])
 
     print("\n=== NONCES ===")
-    print("First Public Nonce: \(firstNonce.pubnonce.bytes.map { String(format: "%02x", $0) }.joined())")
-    print("External Nonce: \(externalNonce.bytes.map { String(format: "%02x", $0) }.joined())")
-    print("Aggregate with External: \(aggregateWithExternal.bytes.map { String(format: "%02x", $0) }.joined())")
+    print("First Public Nonce: \(firstNonce.hexString)")
+    print("External Nonce: \(externalNonce.hexString)")
+    print("Aggregate with External: \(aggregateWithExternal.hexString)")
 
     // Create partial signatures
     let messageHash = Data(hexString: "101ff225c7506c82ea0285dafd2571360ed5831ef0b3580b57fefeb2e90aec99")!

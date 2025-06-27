@@ -70,6 +70,11 @@ public extension P256K.MuSig {
             aggregatedNonce.makeIterator()
         }
 
+        /// A hex string representation of the aggregated nonce.
+        public var hexString: String {
+            aggregatedNonce.hexString
+        }
+
         /// Generates a nonce pair (secret and public) for MuSig signing.
         ///
         /// This function implements the nonce generation process as described in BIP-327.
@@ -175,6 +180,11 @@ public extension P256K.MuSig {
         public let pubnonce: P256K.Schnorr.Nonce
         /// The secret nonce.
         public let secnonce: P256K.Schnorr.SecureNonce
+        
+        /// A hex string representation of the public nonce.
+        public var hexString: String {
+            pubnonce.hexString
+        }
     }
 }
 
@@ -235,6 +245,11 @@ public extension P256K.Schnorr {
         /// - Returns: An iterator for the public nonce data.
         public func makeIterator() -> Data.Iterator {
             pubnonce.makeIterator()
+        }
+
+        /// A hex string representation of the public nonce.
+        public var hexString: String {
+            pubnonce.hexString
         }
     }
 }
