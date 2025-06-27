@@ -231,31 +231,6 @@ public extension P256K.Schnorr {
         public init(serializedNonce: [UInt8]) throws {
             try self.init(serializedNonce: Data(serializedNonce))
         }
-        
-        /// Creates a public nonce from a hexadecimal string representation.
-        ///
-        /// This initializer parses a serialized public nonce from a hexadecimal string.
-        /// The input string must represent 66 bytes (132 hex characters) of data.
-        ///
-        /// - Parameter hexString: A hexadecimal string representing the 66-byte serialized nonce.
-        /// - Throws: An error if parsing fails or the string is not valid hex.
-        public init(hexString: String) throws {
-            // Remove any "0x" prefix if present
-            var cleanedHexString = hexString
-            if hexString.hasPrefix("0x") {
-                cleanedHexString = String(hexString.dropFirst(2))
-            }
-            
-            // Check if the hex string has the correct length
-            guard cleanedHexString.count == 132 else {
-                throw secp256k1Error.incorrectParameterSize
-            }
-            
-            // Convert hex string to bytes using the existing String.bytes property
-            let bytes = try cleanedHexString.bytes
-            
-            try self.init(serializedNonce: bytes)
-        }
 
         /// Creates a public nonce directly from raw pubnonce data.
         ///
