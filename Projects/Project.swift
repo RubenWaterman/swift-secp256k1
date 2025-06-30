@@ -96,6 +96,23 @@ let project = Project(
                     .release(name: "Release", xcconfig: "Resources/XCFrameworkApp/Release.xcconfig")
                 ]
             )
+        ),
+        .target(
+            name: "BoltzExample",
+            destinations: [.mac],
+            product: .executable,
+            bundleId: "dev.21.BoltzExample",
+            deploymentTargets: deploymentTargets,
+            sources: ["Sources/BoltzExample/**"],
+            dependencies: [
+                .target(name: "P256K")
+            ],
+            settings: .settings(
+                configurations: [
+                    .debug(name: "Debug", xcconfig: "Resources/BoltzExample/Debug.xcconfig"),
+                    .release(name: "Release", xcconfig: "Resources/BoltzExample/Release.xcconfig")
+                ]
+            )
         )
     ]
 )

@@ -1,0 +1,56 @@
+📋 Step 1: Using hardcoded preimage and hash
+Preimage: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899
+Preimage hash: 13216bdbddb256a9c661c2f6844cdba5ca81d1d9b4225153f0834c58d027fc8d
+
+📋 Step 2: Using hardcoded P256K Signing key pair
+Private key: f1709ec6ca1e8f06508a3d2c23b7503b6457c1fe60ecac46ab0ebf4082a2c640
+Public key (compressed): 02f8b2dfc86aa1f5c6df0d3089c74088eaf0527216b61472113e8839e4e4bbb69f
+Public key length: 33 bytes
+Public key format: compressed
+First byte: 02
+
+📋 Step 3: Creating reverse swap with Boltz...
+📡 HTTP Response Status: 201
+📡 Raw Response: {"id":"JBNzhT7v2vcW","invoice":"lnbcrt500u1p5x92pfsp5f6smuz5w0qgpz7wvh606ax9k68esq3vgvgtq5ah8gva8p27h8jfqpp5zvskhk7akft2n3npctmggnxm5h9gr5weks39z5lssdx935p8ljxsdql2djkuepqw3hjqsj5gvsxzerywfjhxucxqyp2xqcqzyl9qyysgqhguqs0tu7yvd4ztfxwl893wr9y5p0u5q86a8xengzwy25anayvpk3qsjlxcsku66ya8c69zgrvjyvcht9y6cxwxu765lc7l5m5wma6qqjt0mjl","swapTree":{"claimLeaf":{"version":192,"output":"82012088a914772e71cb02fdf4430127ba1239539dd7e2375a838820f8b2dfc86aa1f5c6df0d3089c74088eaf0527216b61472113e8839e4e4bbb69fac"},"refundLeaf":{"version":192,"output":"2041378915c3302c44989fcb499c8e98b4e8da259062bbcb698bc043a7795b4ce6ad025d01b1"}},"lockupAddress":"bcrt1p06d9vkydufpkan0rdk4vlgyup5tgt897e9ss7xtnq3qrglasl3csqplztz","refundPublicKey":"0241378915c3302c44989fcb499c8e98b4e8da259062bbcb698bc043a7795b4ce6","timeoutBlockHeight":349,"onchainAmount":49442}
+
+📋 Step 4: Created reverse swap with Boltz
+Swap ID: JBNzhT7v2vcW
+Refund public key: 0241378915c3302c44989fcb499c8e98b4e8da259062bbcb698bc043a7795b4ce6
+Lockup address: bcrt1p06d9vkydufpkan0rdk4vlgyup5tgt897e9ss7xtnq3qrglasl3csqplztz
+Invoice: lnbcrt500u1p5x92pfsp5f6smuz5w0qgpz7wvh606ax9k68esq3vgvgtq5ah8gva8p27h8jfqpp5zvskhk7akft2n3npctmggnxm5h9gr5weks39z5lssdx935p8ljxsdql2djkuepqw3hjqsj5gvsxzerywfjhxucxqyp2xqcqzyl9qyysgqhguqs0tu7yvd4ztfxwl893wr9y5p0u5q86a8xengzwy25anayvpk3qsjlxcsku66ya8c69zgrvjyvcht9y6cxwxu765lc7l5m5wma6qqjt0mjl
+Timeout block height: 349
+Onchain amount: 49442
+
+📋 Step 5: Setting up WebSocket connection...
+WebSocket endpoint: wss://api.regtest.getbittr.com/v2/ws
+✅ WebSocket connected and subscribed to swap updates
+Waiting for swap status updates...
+Subscribed to swap updates for ID: JBNzhT7v2vcW
+Got WebSocket update:
+["channel": swap.update, "args": <__NSSingleObjectArrayI 0x154008090>(
+JBNzhT7v2vcW
+)
+, "timestamp": 1751296042703, "event": subscribe]
+
+Got WebSocket update:
+["args": <__NSSingleObjectArrayI 0x152e1e170>(
+{
+    id = JBNzhT7v2vcW;
+    status = "swap.created";
+}
+)
+, "event": update, "channel": swap.update, "timestamp": 1751296042706]
+
+Waiting for invoice to be paid
+Got WebSocket update:
+["channel": swap.update, "args": <__NSSingleObjectArrayI 0x154209700>(
+{
+    id = JBNzhT7v2vcW;
+    status = "transaction.mempool";
+    transaction =     {
+        eta = 2;
+        hex = 01000000000101f4ae8e1a2b9593587c473ca9da0f3d4509a11be2e8f4f59915267de3993d6c910100000000ffffffff02949bcfb20000000022512011bf1b0748b8ada4f0c36e656a155e629ff3050188d079fbbf03a5a3745cb3bc22c10000000000002251207e9a56588de2436ecde36daacfa09c0d16859cbec9610f19730440347fb0fc71024730440220770ad26954e5e00ab339c84e5d18e63f9bf87453d03b6c7dd16d0df41b81a0e602203336c8f4822791ca5daafd5909efb9c1c4c994beda659648569bb0cecff314b0012103e38ad4d38825dcb29763e9b76bc4136cc6c751efd89f120346aae5fee8f2dd8e00000000;
+        id = 093540e13ede6079fdf4680488a378bb358cad5fcd72ec668e8a9b3791cba3c9;
+    };
+}
+
