@@ -179,7 +179,7 @@ public extension P256K.Schnorr {
     struct Nonce: ContiguousBytes, Sequence {
         /// The public nonce data.
         let pubnonce: Data
-        
+
         /// Creates a public nonce from a 66-byte serialized nonce.
         ///
         /// This function uses the underlying `secp256k1_musig_pubnonce_parse` function
