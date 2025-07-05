@@ -180,6 +180,13 @@ public extension P256K.Schnorr {
         /// The public nonce data.
         let pubnonce: Data
 
+        /// Creates a public nonce from raw data.
+        ///
+        /// - Parameter pubnonce: The raw nonce data.
+        public init(pubnonce: Data) {
+            self.pubnonce = pubnonce
+        }
+
         /// Provides access to the raw bytes of the public nonce.
         ///
         /// - Parameter body: A closure that takes an `UnsafeRawBufferPointer` and returns a value.
