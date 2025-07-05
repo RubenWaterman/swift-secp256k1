@@ -188,14 +188,14 @@ public extension P256K.Schnorr {
         /// - Parameter pubnonce: A 66-byte serialized MuSig public nonce.
         /// - Throws: An error if the nonce cannot be parsed or is invalid.
         public init(pubnonce: Data) throws {
-            guard serializedNonce.count == 66 else {
+            guard pubnonce.count == 66 else {
                 throw secp256k1Error.incorrectParameterSize
             }
             
             let context = P256K.Context.rawRepresentation
             var pubnonce = secp256k1_musig_pubnonce()
             
-            guard secp256k1_musig_pubnonce_parse(context, &pubnonce, Array(serializedNonce)).boolValue else {
+            guard secp256k1_musig_pubnonce_parse(context, &pubnonce, Array(pubnonce)).boolValue else {
                 throw secp256k1Error.underlyingCryptoError
             }
             
