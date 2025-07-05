@@ -180,6 +180,13 @@ public extension P256K.Schnorr {
         /// The public nonce data.
         let pubnonce: Data
 
+        /// Creates a public nonce from raw data.
+        ///
+        /// - Parameter pubnonce: The raw nonce data.
+        public init(pubnonce: Data) {
+            self.pubnonce = pubnonce
+        }
+
         /// Creates a public nonce from a 66-byte serialized nonce.
         ///
         /// This function uses the underlying `secp256k1_musig_pubnonce_parse` function
