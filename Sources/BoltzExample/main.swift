@@ -75,6 +75,11 @@ struct BoltzTransactionRequest: Codable {
     let hex: String
 }
 
+struct BoltzRefundResponse: Codable {
+    let pubNonce: String
+    let partialSignature: String
+}
+
 // MARK: - Boltz Client
 
 @available(macOS 12.0, *)
@@ -154,11 +159,11 @@ class BoltzWebSocket {
     private let url: URL
     private let swapId: String
     private let client: BoltzClient
-    private let privateKey: P256K.Signing.PrivateKey
+    private let privateKey: P256K.Schnorr.PrivateKey
     private let preimage: [UInt8]
     private let destinationAddress: String
     
-    init(swapId: String, client: BoltzClient, privateKey: P256K.Signing.PrivateKey, preimage: [UInt8], destinationAddress: String) {
+    init(swapId: String, client: BoltzClient, privateKey: P256K.Schnorr.PrivateKey, preimage: [UInt8], destinationAddress: String) {
         self.swapId = swapId
         self.client = client
         self.privateKey = privateKey
@@ -264,7 +269,7 @@ class BoltzWebSocket {
             // For development, let's try to get a partial signature from Boltz
             // This will help us understand the API structure
             Task {
-                await attemptClaimTransaction(transactionHex: transactionHex)
+                await attemptClaimTransaction(swapId: swapId, transactionHex: transactionHex, privateKey: privateKey, preimage: preimage)
             }
             
         case "invoice.settled":
@@ -280,10 +285,31 @@ class BoltzWebSocket {
         webSocket?.cancel()
     }
     
-    private func attemptClaimTransaction(transactionHex: String) async {
+    private func attemptClaimTransaction(swapId: String, transactionHex: String, privateKey: P256K.Schnorr.PrivateKey, preimage: [UInt8]) async {
         print("🔧 Attempting to claim transaction")
         
         do {
+            // Convert our Signing.PublicKey to Schnorr.PublicKey for MuSig aggregation
+            let ourPublicKey = privateKey.publicKey
+            let ourSchnorrPublicKey = try! P256K.Schnorr.PublicKey(
+                dataRepresentation: ourPublicKey.dataRepresentation,
+                format: .compressed
+            )
+            
+            let boltzServerPublicKeyBytes = "0241378915c3302c44989fcb499c8e98b4e8da259062bbcb698bc043a7795b4ce6".hexadecimal
+        
+            let boltzServerPublicKey = try! P256K.Schnorr.PublicKey(
+                dataRepresentation: Data(boltzServerPublicKeyBytes),
+                format: .compressed
+            )
+            
+            print("Boltz server public key: \(boltzServerPublicKey.dataRepresentation.map { String(format: "%02x", $0) }.joined())")
+            print("Our Schnorr public key: \(ourSchnorrPublicKey.dataRepresentation.map { String(format: "%02x", $0) }.joined())")
+
+            let boltzAggregateKey = try P256K.MuSig.aggregate([boltzServerPublicKey, ourSchnorrPublicKey], sortKeys: false)
+            
+            print("Aggregate key: \(boltzAggregateKey.dataRepresentation.map { String(format: "%02x", $0) }.joined())")
+
             // Step 1: Create a simple claim transaction hex (placeholder)
             // In a real implementation, this would be a proper Bitcoin transaction
             let placeholderClaimTx = "02000000000000000000" // Placeholder hex
@@ -335,69 +361,102 @@ class SimpleBoltzExample {
     
     func runExample() async {
         do {
-            print("🚀 Starting Simple Boltz Reverse Swap Example")
-            print("=============================================")
+            print("🚀 Starting Boltz Claim Example (Skipping Swap Creation)")
+            print("=====================================================")
             
-            // Step 1: Use hardcoded preimage for development
+            // Use hardcoded preimage for development
             let preimage = hardcodedPreimageBytes
             let preimageHash = Array(SHA256.hash(data: Data(preimage)))
             
-            print("\n📋 Step 1: Using hardcoded preimage and hash")
+            print("\n📋 Using hardcoded preimage and hash")
             print("Preimage: \(preimage.map { String(format: "%02x", $0) }.joined())")
             print("Preimage hash: \(preimageHash.map { String(format: "%02x", $0) }.joined())")
             
-            // Step 2: Use hardcoded P256K Signing key pair
+            // Use hardcoded P256K Signing key pair
             let privateKeyBytes = hardcodedPrivateKeyHex.hexadecimal
-            let privateKey = try P256K.Signing.PrivateKey(dataRepresentation: Data(privateKeyBytes))
-            let publicKey = privateKey.publicKey
-            
+            let privateKey = try P256K.Schnorr.PrivateKey(dataRepresentation: Data(privateKeyBytes))
+            let ourPublicKey = privateKey.publicKey
+
             // Get the compressed public key format (33 bytes starting with 02/03)
-            let compressedPublicKey = publicKey.dataRepresentation
+            let compressedPublicKey = ourPublicKey.dataRepresentation
             
-            print("\n📋 Step 2: Using hardcoded P256K Signing key pair")
+            print("\n📋 Using hardcoded P256K Signing key pair")
             print("Private key: \(hardcodedPrivateKeyHex)")
             print("Public key (compressed): \(compressedPublicKey.map { String(format: "%02x", $0) }.joined())")
             print("Public key length: \(compressedPublicKey.count) bytes")
-            print("Public key format: \(publicKey.format)")
+            print("Public key format: \(ourPublicKey.format)")
             print("First byte: \(String(format: "%02x", compressedPublicKey.first ?? 0))")
             
-            // Step 3: Create reverse swap with Boltz
-            let swapRequest = BoltzSwapRequest(
-                invoiceAmount: invoiceAmount,
-                to: "BTC",
-                from: "BTC",
-                claimPublicKey: compressedPublicKey.map { String(format: "%02x", $0) }.joined(),
-                preimageHash: preimageHash.map { String(format: "%02x", $0) }.joined()
+            // Convert to Schnorr format for MuSig
+            let boltzServerPublicKeyBytes = "0241378915c3302c44989fcb499c8e98b4e8da259062bbcb698bc043a7795b4ce6".hexadecimal
+        
+            let boltzServerPublicKey = try! P256K.Schnorr.PublicKey(
+                dataRepresentation: Data(boltzServerPublicKeyBytes),
+                format: .compressed
             )
             
-            print("\n📋 Step 3: Creating reverse swap with Boltz...")
-            let swapResponse = try await client.createReverseSwap(request: swapRequest)
+            // Convert our Signing.PublicKey to Schnorr.PublicKey for MuSig aggregation
+            let ourSchnorrPublicKey = try! P256K.Schnorr.PublicKey(
+                dataRepresentation: ourPublicKey.dataRepresentation,
+                format: .compressed
+            )
             
-            print("\n📋 Step 4: Created reverse swap with Boltz")
-            print("Swap ID: \(swapResponse.id)")
-            print("Refund public key: \(swapResponse.refundPublicKey)")
-            print("Lockup address: \(swapResponse.lockupAddress)")
-            print("Invoice: \(swapResponse.invoice)")
-            print("Timeout block height: \(swapResponse.timeoutBlockHeight)")
-            print("Onchain amount: \(swapResponse.onchainAmount)")
+            print("Boltz server public key: \(boltzServerPublicKey.dataRepresentation.map { String(format: "%02x", $0) }.joined())")
+            print("Our Schnorr public key: \(ourSchnorrPublicKey.dataRepresentation.map { String(format: "%02x", $0) }.joined())")
+
+            let boltzAggregateKey = try P256K.MuSig.aggregate([boltzServerPublicKey, ourSchnorrPublicKey], sortKeys: false)
             
-            // Step 5: Set up WebSocket connection
-            print("\n📋 Step 5: Setting up WebSocket connection...")
-            print("WebSocket endpoint: \(client.webSocketEndpoint)/v2/ws")
+            print("Aggregate key: \(boltzAggregateKey.dataRepresentation.map { String(format: "%02x", $0) }.joined())")
             
-            let webSocket = BoltzWebSocket(swapId: swapResponse.id, client: client, privateKey: privateKey, preimage: preimage, destinationAddress: destinationAddress)
-            webSocket.connect()
+            let tweak = try! "82012088a914772e71cb02fdf4430127ba1239539dd7e2375a838820f8b2dfc86aa1f5c6df0d3089c74088eaf0527216b61472113e8839e4e4bbb69fac".hexadecimal
+            let tweakedKey = try! boltzAggregateKey.add(Data(tweak))
             
-            print("✅ WebSocket connected and subscribed to swap updates")
-            print("Waiting for swap status updates...")
+            let hexTweakedString = tweakedKey.dataRepresentation.map { String(format: "%02x", $0) }.joined()
+            print("hexTweakedString: \(hexTweakedString)")
             
-            // Keep the program running to receive WebSocket messages
-            // In a real application, you'd want proper lifecycle management
-            try await Task.sleep(nanoseconds: 60_000_000_000) // 60 seconds
-            webSocket.disconnect()
+            // Message to be signed
+            let message = "Vires in Numeris.".data(using: .utf8)!
+            let messageHash = SHA256.hash(data: message)
+
+            // Generate nonces for each signer
+            let firstNonce = try P256K.MuSig.Nonce.generate(
+                secretKey: privateKey,
+                publicKey: ourSchnorrPublicKey,
+                msg32: Array(messageHash)
+            )
             
-            print("\n🎉 Simple Boltz example completed successfully!")
-            print("=============================================")
+            print("firstNonce: \(firstNonce.hexString)")
+            
+            // Make API call to get refund partial signature from Boltz
+            let refundEndpoint = "https://api.regtest.getbittr.com/v2/swap/submarine/\(swapId)/refund"
+            
+            let requestBody: [String: Any] = [
+                "pubNonce": firstNonce.hexString,
+                "transaction": "placeholder_transaction_hex", // We'll use a placeholder for now
+                "index": 0
+            ]
+            
+            print("📡 Making refund API call to: \(refundEndpoint)")
+            print("📡 Request body: \(requestBody)")
+            
+            // add some code here to build the transaction
+            
+            // Use existing swap data from the successful run
+            let existingSwapId = "JBNzhT7v2vcW"
+            let existingRefundPublicKey = "0241378915c3302c44989fcb499c8e98b4e8da259062bbcb698bc043a7795b4ce6"
+            let existingLockupTxHex = "01000000000101f4ae8e1a2b9593587c473ca9da0f3d4509a11be2e8f4f59915267de3993d6c910100000000ffffffff02949bcfb20000000022512011bf1b0748b8ada4f0c36e656a155e629ff3050188d079fbbf03a5a3745cb3bc22c10000000000002251207e9a56588de2436ecde36daacfa09c0d16859cbec9610f19730440347fb0fc71024730440220770ad26954e5e00ab339c84e5d18e63f9bf87453d03b6c7dd16d0df41b81a0e602203336c8f4822791ca5daafd5909efb9c1c4c994beda659648569bb0cecff314b0012103e38ad4d38825dcb29763e9b76bc4136cc6c751efd89f120346aae5fee8f2dd8e00000000"
+            
+            print("\n📋 Using existing swap data")
+            print("Swap ID: \(existingSwapId)")
+            print("Refund public key: \(existingRefundPublicKey)")
+            print("Lockup transaction: \(existingLockupTxHex)")
+            
+            // Start the claim process directly
+            print("\n🔧 Starting claim process...")
+            await attemptClaimTransaction(swapId: existingSwapId, transactionHex: existingLockupTxHex, privateKey: privateKey, preimage: preimage)
+            
+            print("\n🎉 Claim example completed!")
+            print("=====================================================")
             
         } catch {
             print("❌ Error: \(error)")
