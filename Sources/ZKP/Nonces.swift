@@ -180,11 +180,26 @@ public extension P256K.Schnorr {
         /// The public nonce data.
         let pubnonce: Data
 
-        /// Creates a public nonce from raw data.
+        /// Creates a public nonce from a 66-byte serialized nonce.
         ///
-        /// - Parameter pubnonce: The raw nonce data.
-        public init(pubnonce: Data) {
-            self.pubnonce = pubnonce
+        /// This function uses the underlying `secp256k1_musig_pubnonce_parse` function
+        /// to validate and parse the serialized nonce data.
+        ///
+        /// - Parameter pubnonce: A 66-byte serialized MuSig public nonce.
+        /// - Throws: An error if the nonce cannot be parsed or is invalid.
+        public init(pubnonce: Data) throws {
+            guard serializedNonce.count == 66 else {
+                throw secp256k1Error.incorrectParameterSize
+            }
+            
+            let context = P256K.Context.rawRepresentation
+            var pubnonce = secp256k1_musig_pubnonce()
+            
+            guard secp256k1_musig_pubnonce_parse(context, &pubnonce, Array(serializedNonce)).boolValue else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            self.pubnonce = Swift.withUnsafeBytes(of: pubnonce) { Data($0) }
         }
 
         /// Provides access to the raw bytes of the public nonce.
