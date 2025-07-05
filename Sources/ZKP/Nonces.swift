@@ -32,12 +32,20 @@ public extension P256K.MuSig {
             let context = P256K.Context.rawRepresentation
             var aggNonce = secp256k1_musig_aggnonce()
 
+            // Parse the serialized nonces back into internal structures
+            let parsedNonces = try pubnonces.map { schnorrNonce in
+                var pubnonce = secp256k1_musig_pubnonce()
+                // Parse the serialized 66-byte data back into the internal structure
+                guard schnorrNonce.pubnonce.withUnsafeBytes({ bytes in
+                    secp256k1_musig_pubnonce_parse(context, &pubnonce, bytes.baseAddress!).boolValue
+                }) else {
+                    throw secp256k1Error.underlyingCryptoError
+                }
+                return pubnonce
+            }
+
             guard PointerArrayUtility.withUnsafePointerArray(
-                pubnonces.map {
-                    var pubnonce = secp256k1_musig_pubnonce()
-                    $0.pubnonce.copyToUnsafeMutableBytes(of: &pubnonce.data)
-                    return pubnonce
-                }, { pointers in
+                parsedNonces, { pointers in
                     secp256k1_musig_nonce_agg(context, &aggNonce, pointers, pointers.count).boolValue
                 }
             ) else {
@@ -60,6 +68,56 @@ public extension P256K.MuSig {
         /// - Returns: An iterator for the aggregated nonce data.
         public func makeIterator() -> Data.Iterator {
             aggregatedNonce.makeIterator()
+        }
+
+        /// A hex string representation of the aggregated nonce.
+        public var hexString: String {
+            aggregatedNonce.hexString
+        }
+
+        /// Parses a serialized public nonce from hex string format.
+        ///
+        /// This function takes a hex string representing a 66-byte serialized public nonce
+        /// and converts it to a MuSig nonce that can be used for aggregation.
+        /// Uses the underlying secp256k1_musig_pubnonce_parse function for proper validation.
+        ///
+        /// - Parameter hexString: A hex string representing the 66-byte serialized public nonce.
+        /// - Returns: A `P256K.Schnorr.Nonce` that can be used for MuSig operations.
+        /// - Throws: An error if the hex string is invalid or parsing fails.
+        public static func parse(hexString: String) throws -> P256K.Schnorr.Nonce {
+            let data = try Data(hexString: hexString)
+            return try parse(data: data)
+        }
+
+        /// Parses a serialized public nonce from raw data.
+        ///
+        /// This function takes raw data representing a 66-byte serialized public nonce
+        /// and converts it to a MuSig nonce that can be used for aggregation.
+        /// Uses the underlying secp256k1_musig_pubnonce_parse function for proper validation.
+        ///
+        /// - Parameter data: Raw data representing the 66-byte serialized public nonce.
+        /// - Returns: A `P256K.Schnorr.Nonce` that can be used for MuSig operations.
+        /// - Throws: An error if the data is invalid or parsing fails.
+        public static func parse(data: Data) throws -> P256K.Schnorr.Nonce {
+            let context = P256K.Context.rawRepresentation
+            var pubnonce = secp256k1_musig_pubnonce()
+            
+            // Parse the serialized data using the underlying C function
+            guard data.withUnsafeBytes({ bytes in
+                secp256k1_musig_pubnonce_parse(context, &pubnonce, bytes.baseAddress!).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            // Serialize back to the standard 66-byte format
+            var serializedPubnonce = [UInt8](repeating: 0, count: 66)
+            guard serializedPubnonce.withUnsafeMutableBufferPointer({ buffer in
+                secp256k1_musig_pubnonce_serialize(context, buffer.baseAddress!, &pubnonce).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            return try P256K.Schnorr.Nonce(data: Data(serializedPubnonce))
         }
 
         /// Generates a nonce pair (secret and public) for MuSig signing.
@@ -146,8 +204,16 @@ public extension P256K.MuSig {
                 }
             #endif
 
+            // Serialize the public nonce to the proper 66-byte format
+            var serializedPubnonce = [UInt8](repeating: 0, count: 66)
+            guard serializedPubnonce.withUnsafeMutableBufferPointer({ buffer in
+                secp256k1_musig_pubnonce_serialize(context, buffer.baseAddress!, &pubnonce).boolValue
+            }) else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+
             return NonceResult(
-                pubnonce: P256K.Schnorr.Nonce(pubnonce: Swift.withUnsafeBytes(of: pubnonce) { Data($0) }),
+                pubnonce: try P256K.Schnorr.Nonce(data: Data(serializedPubnonce)),
                 secnonce: P256K.Schnorr.SecureNonce(Swift.withUnsafeBytes(of: secnonce) { Data($0) })
             )
         }
@@ -159,6 +225,11 @@ public extension P256K.MuSig {
         public let pubnonce: P256K.Schnorr.Nonce
         /// The secret nonce.
         public let secnonce: P256K.Schnorr.SecureNonce
+        
+        /// A hex string representation of the public nonce.
+        public var hexString: String {
+            pubnonce.hexString
+        }
     }
 }
 
@@ -182,31 +253,28 @@ public extension P256K.Schnorr {
 
         /// Creates a public nonce from raw data.
         ///
-        /// - Parameter pubnonce: The raw nonce data.
-        public init(pubnonce: Data) {
-            self.pubnonce = pubnonce
-        }
-
-        /// Creates a public nonce from a 66-byte serialized nonce.
-        ///
-        /// This function uses the underlying `secp256k1_musig_pubnonce_parse` function
-        /// to validate and parse the serialized nonce data.
-        ///
-        /// - Parameter serializedNonce: A 66-byte serialized MuSig public nonce.
-        /// - Throws: An error if the nonce cannot be parsed or is invalid.
-        public init(serializedNonce: Data) throws {
-            guard serializedNonce.count == 66 else {
-                throw secp256k1Error.incorrectParameterSize
-            }
-            
-            let context = P256K.Context.rawRepresentation
-            var pubnonce = secp256k1_musig_pubnonce()
-            
-            guard secp256k1_musig_pubnonce_parse(context, &pubnonce, Array(serializedNonce)).boolValue else {
+        /// - Parameter data: The 66-byte public nonce data.
+        /// - Throws: An error if the data is not exactly 66 bytes.
+        public init(data: Data) throws {
+            guard data.count == 66 else {
                 throw secp256k1Error.underlyingCryptoError
             }
-            
-            self.pubnonce = Swift.withUnsafeBytes(of: pubnonce) { Data($0) }
+            self.pubnonce = data
+        }
+
+        /// Creates a public nonce from a hex string.
+        ///
+        /// - Parameter hexString: A hex string representing the 66-byte public nonce.
+        /// - Throws: An error if the hex string is invalid or not exactly 132 characters (66 bytes).
+        public init(hexString: String) throws {
+            guard hexString.count == 132 else { // 66 bytes = 132 hex characters
+                throw secp256k1Error.underlyingCryptoError
+            }
+            let data = try Data(hexString: hexString)
+            guard data.count == 66 else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            self.pubnonce = data
         }
 
         /// Provides access to the raw bytes of the public nonce.
@@ -222,6 +290,11 @@ public extension P256K.Schnorr {
         /// - Returns: An iterator for the public nonce data.
         public func makeIterator() -> Data.Iterator {
             pubnonce.makeIterator()
+        }
+
+        /// A hex string representation of the public nonce.
+        public var hexString: String {
+            pubnonce.hexString
         }
     }
 }

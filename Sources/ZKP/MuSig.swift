@@ -289,6 +289,38 @@ public extension P256K.Schnorr {
             self.session = Data(session)
         }
 
+        /// Creates a partial signature from a hex string (32-byte signature only).
+        /// Note: This creates a partial signature without session data, which may not be usable
+        /// for aggregation unless the session data is provided separately.
+        ///
+        /// - Parameter hexString: A hex string representing the 32-byte partial signature.
+        /// - Throws: An error if the hex string is invalid or not exactly 64 characters (32 bytes).
+        public init(hexString: String) throws {
+            guard hexString.count == 64 else { // 32 bytes = 64 hex characters
+                throw secp256k1Error.underlyingCryptoError
+            }
+            
+            let data = try Data(hexString: hexString)
+            self.dataRepresentation = data
+            // Create empty session data - this will need to be set properly for aggregation
+            self.session = Data(repeating: 0, count: 133)
+        }
+
+        /// Creates a partial signature from raw data (32-byte signature only).
+        /// Note: This creates a partial signature without session data, which may not be usable
+        /// for aggregation unless the session data is provided separately.
+        ///
+        /// - Parameter data: The 32-byte partial signature data.
+        /// - Throws: An error if the data is not exactly 32 bytes.
+        public init(data: Data) throws {
+            guard data.count == 32 else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+            self.dataRepresentation = data
+            // Create empty session data - this will need to be set properly for aggregation
+            self.session = Data(repeating: 0, count: 133)
+        }
+
         /// Initializes SchnorrSignature from the raw representation.
         /// - Parameters:
         ///     - rawRepresentation: A raw representation of the key as a collection of contiguous bytes.
@@ -308,6 +340,18 @@ public extension P256K.Schnorr {
         /// - Returns: The value returned by the closure.
         public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
             try dataRepresentation.withUnsafeBytes(body)
+        }
+
+        /// Sets the session data for this partial signature.
+        /// This is useful when importing external partial signatures that don't include session data.
+        ///
+        /// - Parameter session: The 133-byte session data.
+        /// - Throws: An error if the session data is not exactly 133 bytes.
+        public mutating func setSession(_ session: Data) throws {
+            guard session.count == 133 else {
+                throw secp256k1Error.incorrectParameterSize
+            }
+            self.session = session
         }
     }
 }
@@ -514,7 +558,9 @@ public extension P256K.MuSig {
         var signature = [UInt8](repeating: 0, count: P256K.ByteLength.signature)
         var session = secp256k1_musig_session()
 
-        partialSignatures.first?.session.copyToUnsafeMutableBytes(of: &session.data)
+        // Find the first partial signature with non-empty session data
+        let sessionData = partialSignatures.first { !$0.session.allSatisfy({ $0 == 0 }) }?.session ?? partialSignatures.first?.session
+        sessionData?.copyToUnsafeMutableBytes(of: &session.data)
 
         guard PointerArrayUtility.withUnsafePointerArray(
             partialSignatures.map {
