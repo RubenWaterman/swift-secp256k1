@@ -485,6 +485,94 @@ public extension P256K.Schnorr.PrivateKey {
             publicKeyAggregate: publicKeyAggregate
         )
     }
+
+    /// Generates a partial signature for MuSig using an x-only public key.
+    ///
+    /// This function implements the partial signing process as described in BIP-327.
+    /// This overload is useful when working with Taproot outputs that use x-only keys.
+    ///
+    /// - Parameters:
+    ///   - digest: The message digest to sign.
+    ///   - pubnonce: The signer's public nonce.
+    ///   - secureNonce: The signer's secret nonce.
+    ///   - publicNonceAggregate: The aggregate of all signers' public nonces.
+    ///   - xonlyKeyAggregate: The aggregate of all signers' x-only public keys.
+    /// - Returns: A partial MuSig signature.
+    /// - Throws: An error if partial signature generation fails.
+    func partialSignature<D: Digest>(
+        for digest: D,
+        pubnonce: P256K.Schnorr.Nonce,
+        secureNonce: consuming P256K.Schnorr.SecureNonce,
+        publicNonceAggregate: P256K.MuSig.Nonce,
+        xonlyKeyAggregate: P256K.MuSig.XonlyKey
+    ) throws -> P256K.Schnorr.PartialSignature {
+        let context = P256K.Context.rawRepresentation
+        var signature = secp256k1_musig_partial_sig()
+        var secnonce = secp256k1_musig_secnonce()
+        var keypair = secp256k1_keypair()
+        var cache = secp256k1_musig_keyagg_cache()
+        var session = secp256k1_musig_session()
+        var aggnonce = secp256k1_musig_aggnonce()
+        var partialSignature = [UInt8](repeating: 0, count: P256K.ByteLength.partialSignature)
+
+        guard secp256k1_keypair_create(context, &keypair, Array(dataRepresentation)).boolValue else {
+            throw secp256k1Error.underlyingCryptoError
+        }
+
+        secureNonce.data.copyToUnsafeMutableBytes(of: &secnonce.data)
+        xonlyKeyAggregate.cache.copyToUnsafeMutableBytes(of: &cache.data)
+        publicNonceAggregate.aggregatedNonce.copyToUnsafeMutableBytes(of: &aggnonce.data)
+
+        #if canImport(libsecp256k1_zkp)
+            guard secp256k1_musig_nonce_process(context, &session, &aggnonce, Array(digest), &cache, nil).boolValue,
+                  secp256k1_musig_partial_sign(context, &signature, &secnonce, &keypair, &cache, &session).boolValue,
+                  secp256k1_musig_partial_sig_serialize(context, &partialSignature, &signature).boolValue
+            else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+        #elseif canImport(libsecp256k1)
+            guard secp256k1_musig_nonce_process(context, &session, &aggnonce, Array(digest), &cache).boolValue,
+                  secp256k1_musig_partial_sign(context, &signature, &secnonce, &keypair, &cache, &session).boolValue,
+                  secp256k1_musig_partial_sig_serialize(context, &partialSignature, &signature).boolValue
+            else {
+                throw secp256k1Error.underlyingCryptoError
+            }
+        #endif
+
+        return try P256K.Schnorr.PartialSignature(
+            Data(bytes: &partialSignature, count: P256K.ByteLength.partialSignature),
+            session: session.dataValue
+        )
+    }
+
+    /// Generates a partial signature for MuSig using an x-only public key and SHA256 as the hash function.
+    ///
+    /// This is a convenience method that hashes the input data using SHA256 before signing.
+    /// This overload is useful when working with Taproot outputs that use x-only keys.
+    ///
+    /// - Parameters:
+    ///   - data: The data to sign.
+    ///   - pubnonce: The signer's public nonce.
+    ///   - secureNonce: The signer's secret nonce.
+    ///   - publicNonceAggregate: The aggregate of all signers' public nonces.
+    ///   - xonlyKeyAggregate: The aggregate of all signers' x-only public keys.
+    /// - Returns: A partial MuSig signature.
+    /// - Throws: An error if partial signature generation fails.
+    func partialSignature<D: DataProtocol>(
+        for data: D,
+        pubnonce: P256K.Schnorr.Nonce,
+        secureNonce: consuming P256K.Schnorr.SecureNonce,
+        publicNonceAggregate: P256K.MuSig.Nonce,
+        xonlyKeyAggregate: P256K.MuSig.XonlyKey
+    ) throws -> P256K.Schnorr.PartialSignature {
+        try partialSignature(
+            for: SHA256.hash(data: data),
+            pubnonce: pubnonce,
+            secureNonce: secureNonce,
+            publicNonceAggregate: publicNonceAggregate,
+            xonlyKeyAggregate: xonlyKeyAggregate
+        )
+    }
 }
 
 /// An extension for secp256k1_musig_partial_sig providing a convenience property.
