@@ -139,7 +139,7 @@ public extension P256K.MuSig {
             extraInput32: [UInt8]? = nil
         ) throws -> NonceResult {
             try generate(
-                sessionID: Array(SecureBytes(count: 133)),
+                sessionID: Array(SecureBytes(count: 32)),
                 secretKey: secretKey,
                 publicKey: publicKey,
                 msg32: msg32,
