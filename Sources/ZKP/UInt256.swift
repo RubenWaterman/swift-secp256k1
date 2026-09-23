@@ -49,6 +49,7 @@ public protocol SIMDWordsInteger: Codable,
     FixedWidthInteger,
     Sendable
     where
+    Words == SIMDWrapper<Vector>,
     Magnitude: SIMDWordsInteger,
     Magnitude.Magnitude == Magnitude,
     Magnitude.Stride == Stride,
